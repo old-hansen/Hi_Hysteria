@@ -57,6 +57,13 @@ else
     pass "validation cleanup has no broad pkill"
 fi
 
+if grep -q 'reason=service-script:openrc-stop' "$SCRIPT_DIR/src/55-service.sh" \
+    && grep -q 'reason=service-script:rc-stop' "$SCRIPT_DIR/src/55-service.sh"; then
+    pass "generated service stop paths contain signal audit markers"
+else
+    fail "generated service stop signal audit markers missing"
+fi
+
 if [ "$FAIL" -eq 0 ]; then
     echo "ALL signal_handling TESTS PASSED"
 else

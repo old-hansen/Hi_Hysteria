@@ -2766,6 +2766,11 @@ stop() {
     fi
 
     ebegin "Stopping hihy"
+    mkdir -p /etc/hihy/logs
+    printf '%s action=send signal=TERM target_pid=%s sender_pid=%s reason=service-script:openrc-stop\n' \
+        "\$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "\$(cat "\$pidfile")" "\$\$" \
+        >> /etc/hihy/logs/signal-audit.log
+    chmod 600 /etc/hihy/logs/signal-audit.log
     kill \$(cat "\$pidfile")
     rm -f "\$pidfile"
     eend \$?
@@ -2837,6 +2842,11 @@ stop() {
 
     PID=\$(cat "\$PID_FILE")
     echo "Stopping hihy..."
+    mkdir -p "\$HIHY_PATH/logs"
+    printf '%s action=send signal=TERM target_pid=%s sender_pid=%s reason=service-script:rc-stop\n' \
+        "\$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "\$PID" "\$\$" \
+        >> "\$HIHY_PATH/logs/signal-audit.log"
+    chmod 600 "\$HIHY_PATH/logs/signal-audit.log"
     kill "\$PID" 2>/dev/null
     n=0
     while [ \$n -lt 5 ]; do
