@@ -101,7 +101,7 @@ name="hihy"
 description="Hysteria Proxy Service"
 supervisor="supervise-daemon"
 command="${start_cmd_prefix} /etc/hihy/bin/appS"
-command_args="--log-level info -c /etc/hihy/conf/config.yaml server"
+command_args="--log-level debug -c /etc/hihy/conf/config.yaml server"
 command_background="yes"
 pidfile="/var/run/hihy.pid"
 output_log="/etc/hihy/logs/hihy.log"
@@ -188,9 +188,9 @@ start() {
 
     echo "Starting hihy..."
     if [ -n "\$START_CMD_PREFIX" ]; then
-        nohup \$START_CMD_PREFIX \$HIHY_PATH/bin/appS --log-level info -c \$HIHY_PATH/conf/config.yaml server > "\$LOG_FILE" 2>&1 &
+        nohup \$START_CMD_PREFIX \$HIHY_PATH/bin/appS --log-level debug -c \$HIHY_PATH/conf/config.yaml server > "\$LOG_FILE" 2>&1 &
     else
-        nohup \$HIHY_PATH/bin/appS --log-level info -c \$HIHY_PATH/conf/config.yaml server > "\$LOG_FILE" 2>&1 &
+        nohup \$HIHY_PATH/bin/appS --log-level debug -c \$HIHY_PATH/conf/config.yaml server > "\$LOG_FILE" 2>&1 &
     fi
     echo \$! > "\$PID_FILE"
     sleep 1
