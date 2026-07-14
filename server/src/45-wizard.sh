@@ -4,6 +4,7 @@ startInstallValidationProcess() {
     local debug_file="${2:-./hihy_debug.info}"
 
     /etc/hihy/bin/appS -c "$yaml_file" server >"$debug_file" 2>&1 &
+    HIHY_VALIDATION_PID=$!
 }
 
 # ---------- 输入校验辅助 ----------
@@ -987,10 +988,18 @@ waitForValidationOutcome() {
 }
 
 stopValidationProcess() {
-    if ! command -v pkill >/dev/null 2>&1 && command -v apk >/dev/null 2>&1; then
-        apk add --no-cache procps >/dev/null 2>&1
+    local pid="${HIHY_VALIDATION_PID:-}"
+
+    # 只终止本次配置校验启动的进程。旧实现使用 pkill -f，会误杀正式服务。
+    if ! isPositiveInt "$pid" || ! kill -0 "$pid" 2>/dev/null; then
+        unset HIHY_VALIDATION_PID
+        return 0
     fi
-    killHysteriaProcess TERM
+
+    logHysteriaSignalAction TERM "$pid" "config-validation"
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    unset HIHY_VALIDATION_PID
 }
 
 # 校验失败的统一善后:杀掉测试进程 -> 撤销防火墙 -> 清理本次生成的配置

@@ -207,7 +207,11 @@ getPortBindMsg() {
         exit
     fi
 
-    pkill -f "/etc/hihy/bin/appS"
+    # 只关闭实际占用端口的进程，避免误杀所有 Hysteria 实例。
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null; then
+        logHysteriaSignalAction TERM "$pid" "port-bind:${1}/${2}"
+        kill -TERM "$pid" 2>/dev/null || true
+    fi
     echoColor purple "$(i18n port_bind_unbinding)"
     sleep 3
 
@@ -344,7 +348,6 @@ wait_for_continue() {
     echo -e "\n$(echoColor green "$(i18n menu_wait_continue)")"
     read -r -n 1 -s
 }
-
 
 # ----- 20-net-yaml.sh -----
 
@@ -1135,6 +1138,7 @@ startInstallValidationProcess() {
     local debug_file="${2:-./hihy_debug.info}"
 
     /etc/hihy/bin/appS -c "$yaml_file" server >"$debug_file" 2>&1 &
+    HIHY_VALIDATION_PID=$!
 }
 
 # ---------- 输入校验辅助 ----------
@@ -2118,10 +2122,18 @@ waitForValidationOutcome() {
 }
 
 stopValidationProcess() {
-    if ! command -v pkill >/dev/null 2>&1 && command -v apk >/dev/null 2>&1; then
-        apk add --no-cache procps >/dev/null 2>&1
+    local pid="${HIHY_VALIDATION_PID:-}"
+
+    # 只终止本次配置校验启动的进程。旧实现使用 pkill -f，会误杀正式服务。
+    if ! isPositiveInt "$pid" || ! kill -0 "$pid" 2>/dev/null; then
+        unset HIHY_VALIDATION_PID
+        return 0
     fi
-    killHysteriaProcess TERM
+
+    logHysteriaSignalAction TERM "$pid" "config-validation"
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    unset HIHY_VALIDATION_PID
 }
 
 # 校验失败的统一善后:杀掉测试进程 -> 撤销防火墙 -> 清理本次生成的配置
@@ -3204,27 +3216,63 @@ delHihyFirewallPort() {
 
 
 # ----- 65-lifecycle.sh -----
+getSignalAuditLog() {
+    printf '%s/logs/signal-audit.log\n' "${HIHY_ROOT_DIR:-/etc/hihy}"
+}
+
+logHysteriaSignalAction() {
+    local signal="$1"
+    local target_pid="$2"
+    local reason="${3:-unspecified}"
+    local audit_log target_cmd parent_cmd
+
+    local sender_pid="${BASHPID:-$$}"
+    audit_log=$(getSignalAuditLog)
+    mkdir -p "$(dirname "$audit_log")" 2>/dev/null || return 0
+    touch "$audit_log" 2>/dev/null || return 0
+    chmod 600 "$audit_log" 2>/dev/null || true
+    target_cmd=$(tr '\0' ' ' <"/proc/${target_pid}/cmdline" 2>/dev/null || true)
+    parent_cmd=$(ps -o args= -p "$PPID" 2>/dev/null || true)
+    printf '%s action=send signal=%s target_pid=%s sender_pid=%s sender_parent_pid=%s reason=%q target_cmd=%q parent_cmd=%q\n' \
+        "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$signal" "$target_pid" "$sender_pid" "$PPID" \
+        "$reason" "$target_cmd" "$parent_cmd" >>"$audit_log" 2>/dev/null || true
+}
+
 killHysteriaProcess() {
     local signal="${1:-TERM}"
     local pid_file="${2:-/var/run/hihy.pid}"
+    local reason="${3:-${FUNCNAME[1]:-unknown}}"
+    local pid
 
     if [ -f "$pid_file" ]; then
-        local pid
         pid=$(cat "$pid_file" 2>/dev/null)
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            logHysteriaSignalAction "$signal" "$pid" "$reason:pid-file"
             kill "-${signal}" "$pid" 2>/dev/null || true
             sleep 1
         fi
         rm -f "$pid_file"
     fi
 
-    if pgrep -f "/etc/hihy/bin/appS" >/dev/null 2>&1; then
-        pkill "-${signal}" -f "/etc/hihy/bin/appS" 2>/dev/null || true
+    local -a remaining_pids=()
+    mapfile -t remaining_pids < <(pgrep -f "/etc/hihy/bin/appS" 2>/dev/null || true)
+    if [ "${#remaining_pids[@]}" -gt 0 ]; then
+        for pid in "${remaining_pids[@]}"; do
+            [ -n "$pid" ] || continue
+            logHysteriaSignalAction "$signal" "$pid" "$reason:process-scan"
+            kill "-${signal}" "$pid" 2>/dev/null || true
+        done
         sleep 2
-        if pgrep -f "/etc/hihy/bin/appS" >/dev/null 2>&1; then
-            pkill -9 -f "/etc/hihy/bin/appS" 2>/dev/null || true
-            sleep 1
-        fi
+    fi
+
+    mapfile -t remaining_pids < <(pgrep -f "/etc/hihy/bin/appS" 2>/dev/null || true)
+    for pid in "${remaining_pids[@]}"; do
+        [ -n "$pid" ] || continue
+        logHysteriaSignalAction KILL "$pid" "$reason:forced-process-scan"
+        kill -KILL "$pid" 2>/dev/null || true
+    done
+    if [ "${#remaining_pids[@]}" -gt 0 ]; then
+        sleep 1
     fi
 }
 
@@ -3351,7 +3399,6 @@ uninstall() {
         exit 1
     fi
 }
-
 
 # ----- 70-client-common.sh -----
 # 客户端配置公共参数层:一次性读取 backup/config.yaml,供 native/mihomo/singbox 三个生成器共用。

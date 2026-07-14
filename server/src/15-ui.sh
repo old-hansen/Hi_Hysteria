@@ -76,7 +76,11 @@ getPortBindMsg() {
         exit
     fi
 
-    pkill -f "/etc/hihy/bin/appS"
+    # 只关闭实际占用端口的进程，避免误杀所有 Hysteria 实例。
+    if [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null; then
+        logHysteriaSignalAction TERM "$pid" "port-bind:${1}/${2}"
+        kill -TERM "$pid" 2>/dev/null || true
+    fi
     echoColor purple "$(i18n port_bind_unbinding)"
     sleep 3
 
@@ -213,4 +217,3 @@ wait_for_continue() {
     echo -e "\n$(echoColor green "$(i18n menu_wait_continue)")"
     read -r -n 1 -s
 }
-
